@@ -1,13 +1,511 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Steampunk Drill Defense</title>
+  <style>
+    body, html { 
+      margin: 0; 
+      padding: 0; 
+      width: 100%; 
+      height: 100%; 
+      overflow: hidden; 
+      background-color: #111827; 
+      font-family: monospace; 
+      user-select: none; 
+      -webkit-user-select: none;
+      touch-action: none; 
+    }
+    #gameCanvas { 
+      display: block; 
+      width: 100%; 
+      height: 100%; 
+      cursor: crosshair; 
+    }
+    .overlay { 
+      position: absolute; 
+      top: 0; 
+      left: 0; 
+      width: 100%; 
+      height: 100%; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      background: rgba(0,0,0,0.8); 
+      z-index: 10; 
+      color: white; 
+      text-align: center; 
+    }
+    .hidden { display: none !important; }
+    .panel { 
+      background: rgba(0,0,0,0.9); 
+      padding: 2rem; 
+      border-radius: 1rem; 
+      border: 4px solid #374151; 
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); 
+      max-width: 90%; 
+    }
+    h1 { 
+      font-size: 2.5rem; 
+      margin-bottom: 2rem; 
+      color: #fbbf24; 
+      letter-spacing: -0.05em; 
+      line-height: 1.1; 
+    }
+    @media (min-width: 768px) { h1 { font-size: 3rem; } }
+    button { 
+      padding: 1rem 2rem; 
+      background: #2563eb; 
+      color: white; 
+      font-size: 1.25rem; 
+      font-weight: bold; 
+      border: none; 
+      border-bottom: 4px solid #1e40af; 
+      border-radius: 0.25rem; 
+      cursor: pointer; 
+      transition: all 0.1s; 
+      font-family: monospace; 
+      width: 100%; 
+      max-width: 300px; 
+    }
+    button:active { 
+      border-bottom: 0; 
+      transform: translateY(4px); 
+    }
+    .text-gray { 
+      color: #9ca3af; 
+      margin-top: 2rem; 
+      font-size: 0.875rem; 
+      line-height: 1.5; 
+    }
+    #gameOverPanel { border-color: #dc2626; }
+    #gameOverPanel h1 { color: #ef4444; }
+    #gameOverPanel button { background: #dc2626; border-color: #991b1b; }
+    #clearPanel { border-color: #16a34a; }
+    #clearPanel h1 { color: #22c55e; }
+    #clearPanel button { background: #16a34a; border-color: #166534; }
+    .stat { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fbbf24; }
+    .stat-sub { font-size: 1.25rem; margin-bottom: 2rem; color: #d1d5db; }
+  </style>
+</head>
+<body>
+  <div id="menuOverlay" class="overlay">
+    <div class="panel">
+      <h1>STEAMPUNK<br>DRILL DEFENSE</h1>
+      <button id="startBtn">START GAME</button>
+      <div class="text-gray">
+        <p>Drag to move the drill.</p>
+        <p>Destroy falling meteorites.</p>
+        <p>Protect the village!</p>
+      </div>
+    </div>
+  </div>
+  
+  <div id="gameOverOverlay" class="overlay hidden">
+    <div class="panel" id="gameOverPanel">
+      <h1>GAME OVER</h1>
+      <div class="stat" id="goScore">Score: 0</div>
+      <div class="stat-sub" id="goTime">Survived: 0s</div>
+      <button id="retryBtn">RETRY</button>
+    </div>
+  </div>
 
+  <div id="clearOverlay" class="overlay hidden">
+    <div class="panel" id="clearPanel">
+      <h1>VILLAGE SAVED!</h1>
+      <div class="stat" id="clearScore">Score: 0</div>
+      <div class="stat-sub" id="clearTime">Survived: 0s</div>
+      <button id="playAgainBtn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const menuOverlay = document.getElementById('menuOverlay');
+    const gameOverOverlay = document.getElementById('gameOverOverlay');
+    const clearOverlay = document.getElementById('clearOverlay');
+    const goScore = document.getElementById('goScore');
+    const goTime = document.getElementById('goTime');
+    const clearScore = document.getElementById('clearScore');
+    const clearTime = document.getElementById('clearTime');
+    
+    let gameState = 'menu';
+    let playerX = window.innerWidth / 2;
+    let playerY = 0;
+    
+    let gameTime = 0;
+    let score = 0;
+    let hp = 5;
+    let level = 1;
+    let meteorites = [];
+    let ufos = [];
+    let particles = [];
+    let villagers = [];
+    let meteorSpawnTimer = 0;
+    let ufoSpawnTimer = 0;
+    let cameraShake = 0;
+    let lastTime = 0;
+    let animationFrameId;
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      playerY = canvas.height * (2/3);
+      if (playerX > canvas.width) playerX = canvas.width / 2;
+      ctx.imageSmoothingEnabled = false;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function initGame() {
+      gameTime = 0;
+      score = 0;
+      hp = 5;
+      level = 1;
+      meteorites = [];
+      ufos = [];
+      particles = [];
+      villagers = [];
+      meteorSpawnTimer = 0;
+      ufoSpawnTimer = 0;
+      cameraShake = 0;
+      playerX = canvas.width / 2;
+      
+      for(let i=0; i<10; i++) {
+        villagers.push({
+          x: Math.random() * canvas.width,
+          y: playerY + 20 + Math.random() * (canvas.height/3 - 40),
+          vx: (Math.random() - 0.5) * 20,
+          panic: 0,
+          color: ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6'][Math.floor(Math.random()*4)]
+        });
+      }
+      
+      gameState = 'playing';
+      menuOverlay.classList.add('hidden');
+      gameOverOverlay.classList.add('hidden');
+      clearOverlay.classList.add('hidden');
+      
+      lastTime = performance.now();
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(loop);
+    }
+
+    document.getElementById('startBtn').addEventListener('click', initGame);
+    document.getElementById('retryBtn').addEventListener('click', initGame);
+    document.getElementById('playAgainBtn').addEventListener('click', initGame);
+
+    function handlePointerMove(e) {
+      if (gameState !== 'playing') return;
+      const rect = canvas.getBoundingClientRect();
+      let clientX = e.clientX;
+      if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+      }
+      playerX = clientX - rect.left;
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerMove);
+    canvas.addEventListener('pointermove', handlePointerMove);
+    canvas.addEventListener('touchmove', (e) => { 
+      e.preventDefault(); 
+      handlePointerMove(e); 
+    }, { passive: false });
+
+    function createParticles(x, y, color, count) {
+      for(let i=0; i<count; i++) {
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 300,
+          vy: (Math.random() - 0.5) * 300,
+          life: 0.5 + Math.random() * 0.5,
+          color
+        });
+      }
+    }
+
+    function gameOver() {
+      gameState = 'gameover';
+      goScore.innerText = `Score: ${score}`;
+      goTime.innerText = `Survived: ${Math.floor(gameTime)}s`;
+      gameOverOverlay.classList.remove('hidden');
+    }
+
+    function gameClear() {
+      gameState = 'clear';
+      clearScore.innerText = `Score: ${score}`;
+      clearTime.innerText = `Survived: ${Math.floor(gameTime)}s`;
+      clearOverlay.classList.remove('hidden');
+    }
+
+    function loop(time) {
+      if (gameState !== 'playing') return;
+      
+      const dt = Math.min((time - lastTime) / 1000, 0.1);
+      lastTime = time;
+
+      // UPDATE
+      gameTime += dt;
+      level = Math.floor(gameTime / 10) + 1;
+
+      if (gameTime >= 300) {
+        gameClear();
+        return;
+      }
+
+      if (cameraShake > 0) cameraShake -= dt;
+
+      ufoSpawnTimer += dt;
+      if (ufoSpawnTimer >= 10) {
+        ufoSpawnTimer = 0;
+        ufos.push({
+          x: Math.random() > 0.5 ? -50 : canvas.width + 50,
+          y: 50 + Math.random() * 100,
+          vx: Math.random() > 0.5 ? 100 : -100,
+          hasSpawned: false
+        });
+      }
+
+      meteorSpawnTimer += dt;
+      let spawnRate = Math.max(0.2, 1.5 - (level * 0.1));
+      if (gameTime >= 240) spawnRate = 0.15;
+
+      if (meteorSpawnTimer >= spawnRate) {
+        meteorSpawnTimer = 0;
+        let isMulti = gameTime >= 15 && Math.random() < 0.2;
+        meteorites.push({
+          x: Math.random() * canvas.width,
+          y: -30,
+          vy: (50 + Math.random() * 50) * (gameTime >= 240 ? 2 : 1) * (1 + level * 0.05),
+          type: isMulti ? 'multi' : 'basic',
+          radius: isMulti ? 20 : 15,
+          bouncesLeft: isMulti ? 3 : 0,
+          color: isMulti ? '#9b59b6' : '#e74c3c'
+        });
+      }
+
+      for (let i = ufos.length - 1; i >= 0; i--) {
+        let ufo = ufos[i];
+        ufo.x += ufo.vx * dt;
+        
+        if (!ufo.hasSpawned && ufo.x > canvas.width/4 && ufo.x < canvas.width*3/4 && Math.random() < 0.05) {
+          ufo.hasSpawned = true;
+          meteorites.push({
+            x: ufo.x,
+            y: ufo.y,
+            vy: 50,
+            type: 'multi',
+            radius: 20,
+            bouncesLeft: 3,
+            color: '#9b59b6'
+          });
+        }
+
+        if (ufo.x < -100 || ufo.x > canvas.width + 100) {
+          ufos.splice(i, 1);
+        }
+      }
+
+      for (let i = meteorites.length - 1; i >= 0; i--) {
+        let m = meteorites[i];
+        
+        if (m.vy < 0) {
+          m.vy += 400 * dt; // Gravity when bouncing
+        }
+        m.y += m.vy * dt;
+
+        // Collision with Player
+        const playerRect = { x: playerX - 16, y: playerY - 80, w: 32, h: 80 };
+        const distX = Math.abs(m.x - (playerRect.x + playerRect.w / 2));
+        const distY = Math.abs(m.y - (playerRect.y + playerRect.h / 2));
+
+        let hit = false;
+        if (distX <= (playerRect.w / 2 + m.radius) && distY <= (playerRect.h / 2 + m.radius)) {
+          const dx = distX - playerRect.w / 2;
+          const dy = distY - playerRect.h / 2;
+          if (dx * dx + dy * dy <= m.radius * m.radius || (distX <= playerRect.w/2) || (distY <= playerRect.h/2)) {
+            hit = true;
+          }
+        }
+
+        if (hit && m.vy > 0) {
+          if (m.type === 'multi' && m.bouncesLeft > 0) {
+            m.bouncesLeft--;
+            m.vy = -350; // Bounce up
+            score += 50;
+            createParticles(m.x, m.y, m.color, 5);
+          } else {
+            if (m.type === 'multi') score += 500;
+            else score += 100;
+            createParticles(m.x, m.y, m.color, 15);
+            meteorites.splice(i, 1);
+            continue;
+          }
+        }
+
+        // Collision with Ground
+        if (m.y + m.radius >= playerY) {
+          hp--;
+          cameraShake = 0.5;
+          createParticles(m.x, playerY, m.color, 20);
+          meteorites.splice(i, 1);
+          villagers.forEach(v => v.panic = 2.0);
+
+          if (hp <= 0) {
+            gameOver();
+            return;
+          }
+          continue;
+        }
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= dt;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+
+      villagers.forEach(v => {
+        if (v.panic > 0) {
+          v.panic -= dt;
+          v.x += v.vx * 3 * dt;
+          if (Math.random() < 0.05) v.vx *= -1;
+        } else {
+          v.x += v.vx * dt;
+          if (Math.random() < 0.01) v.vx *= -1;
+        }
+        if (v.x < 0) { v.x = 0; v.vx *= -1; }
+        if (v.x > canvas.width) { v.x = canvas.width; v.vx *= -1; }
+      });
+
+      // DRAW
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = '#2c3e50';
+      if (gameTime >= 240) ctx.fillStyle = '#1a0505';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      if (cameraShake > 0) {
+        ctx.translate((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
+      }
+
+      // Ground
+      ctx.fillStyle = '#8e44ad';
+      if (gameTime >= 240) ctx.fillStyle = '#c0392b';
+      ctx.fillRect(0, playerY, canvas.width, canvas.height - playerY);
+      ctx.fillStyle = '#27ae60';
+      if (gameTime >= 240) ctx.fillStyle = '#e67e22';
+      ctx.fillRect(0, playerY, canvas.width, 10);
+
+      // Villagers
+      villagers.forEach(v => {
+        ctx.fillStyle = v.color;
+        ctx.fillRect(v.x - 4, v.y - 8, 8, 12);
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(v.x - 4, v.y - 16, 8, 8);
+        if (v.panic > 0) {
+          ctx.fillStyle = 'white';
+          ctx.font = '12px monospace';
+          ctx.fillText('!', v.x - 4, v.y - 20);
+        }
+      });
+
+      // Player
+      ctx.fillStyle = '#bdc3c7';
+      ctx.fillRect(playerX - 4, playerY - 80, 8, 20);
+      ctx.fillRect(playerX - 8, playerY - 60, 16, 20);
+      ctx.fillRect(playerX - 12, playerY - 40, 24, 20);
+      ctx.fillStyle = '#7f8c8d';
+      ctx.fillRect(playerX - 16, playerY - 20, 32, 20);
+
+      const boyX = playerX + 16;
+      const boyY = playerY - 40;
+      ctx.fillStyle = '#e67e22';
+      ctx.fillRect(boyX, boyY, 12, 12);
+      ctx.fillStyle = '#3498db';
+      ctx.fillRect(boyX, boyY + 12, 12, 16);
+      ctx.fillStyle = '#2c3e50';
+      ctx.fillRect(boyX, boyY + 28, 12, 12);
+      ctx.fillStyle = '#c0392b';
+      ctx.fillRect(boyX + 12, boyY + 12, 8, 16);
+      if (Math.random() > 0.2) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(boyX + 14, boyY + 28, 4, 8 + Math.random() * 8);
+      }
+
+      // Meteorites
+      meteorites.forEach(m => {
+        ctx.fillStyle = m.color;
+        ctx.fillRect(m.x - m.radius + 4, m.y - m.radius, m.radius*2 - 8, m.radius*2);
+        ctx.fillRect(m.x - m.radius, m.y - m.radius + 4, m.radius*2, m.radius*2 - 8);
+        if (m.type === 'multi') {
+          ctx.fillStyle = '#f1c40f';
+          ctx.fillRect(m.x - 4, m.y - 4, 8, 8);
+          ctx.fillStyle = 'white';
+          ctx.font = '12px monospace';
+          ctx.fillText(m.bouncesLeft.toString(), m.x - 4, m.y - 10);
+        }
+      });
+
+      // UFOs
+      ufos.forEach(u => {
+        ctx.fillStyle = '#2ecc71';
+        ctx.fillRect(u.x - 10, u.y - 15, 20, 15);
+        ctx.fillStyle = '#95a5a6';
+        ctx.fillRect(u.x - 25, u.y, 50, 10);
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillRect(u.x - 15, u.y + 10, 30, 5);
+      });
+
+      // Particles
+      particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.life;
+        ctx.fillRect(p.x, p.y, 4, 4);
+        ctx.globalAlpha = 1.0;
+      });
+
+      ctx.restore();
+
+      // UI
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, canvas.width, 60);
+      
+      ctx.fillStyle = 'white';
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`SCORE:${score}`, 10, 25);
+      ctx.fillText(`TIME:${Math.floor(gameTime)}s`, 10, 45);
+      
+      ctx.textAlign = 'right';
+      ctx.fillText(`LVL:${level}`, canvas.width - 10, 25);
+      
+      let hpText = '';
+      for(let i=0; i<5; i++) {
+        hpText += i < hp ? '♥' : '♡';
+      }
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillText(hpText, canvas.width - 10, 45);
+
+      if (gameTime >= 240) {
+        ctx.fillStyle = 'red';
+        ctx.textAlign = 'center';
+        ctx.font = '20px monospace';
+        if (Math.floor(gameTime * 2) % 2 === 0) {
+          ctx.fillText('NIGHTMARE MODE', canvas.width / 2, 80);
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(loop);
+    }
+  </script>
+</body>
+</html>
